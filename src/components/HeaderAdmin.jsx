@@ -2,11 +2,11 @@ import { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
     FaChartBar, FaUserCog, FaFileAlt, FaSignOutAlt,
-    FaChevronDown, FaChevronUp, FaHistory, FaBars, FaTimes, FaCog
+    FaChevronDown, FaChevronUp, FaHistory, FaBars, FaTimes, FaCog, FaLock
 } from "react-icons/fa";
 import { FileCheck } from "lucide-react";
 
-const HeaderAdmin = ({ user }) => {
+const HeaderAdmin = ({ user, onLogout }) => {
     const location = useLocation();
     const [isSidebarOpen, setSidebarOpen] = useState(false);
     const [isAccountOpen, setAccountOpen] = useState(false);
@@ -20,6 +20,7 @@ const HeaderAdmin = ({ user }) => {
         if (location.pathname.includes("/diploma")) setDiplomaOpen(true);
         if (location.pathname.includes("/activity")) setActivityOpen(true);
         if (location.pathname.includes("/setting")) setSettingOpen(true);
+        if (location.pathname.includes("/change-password")) setActiveItem("/change-password");
         setActiveItem(location.pathname);
     }, [location.pathname]);
 
@@ -39,7 +40,12 @@ const HeaderAdmin = ({ user }) => {
                 {/* Avatar và lời chào */}
                 <div className="text-center mb-4">
                     <img src="../logofinish.png" alt="logo" className="w-auto rounded-full mx-auto mb-2 border border-gray-300" />
-                    <h2 className="text-lg font-semibold">Hello, {user?.name || "Admin"}</h2>
+                    <h2
+                        className="text-base font-semibold truncate max-w-full overflow-hidden text-ellipsis whitespace-nowrap"
+                        title={user?.name || "Quản trị viên"}
+                    >
+                        Xin chào, {user?.name || "Quản trị viên"}
+                    </h2>
                     <hr className="border-gray-400 mt-3" />
                 </div>
 
@@ -92,9 +98,9 @@ const HeaderAdmin = ({ user }) => {
                         <div className={`overflow-hidden transition-all duration-300 ${isDiplomaOpen ? "max-h-40" : "max-h-0"}`}>
                             <ul className="ml-6 mt-2">
                                 <li>
-                                    <Link to="/diploma/search" onClick={() => setActiveItem("/diploma/search")}
-                                        className={`block p-2 rounded ${activeItem === "/diploma/search" ? "bg-[#800020] text-white" : "hover:bg-[#800020] hover:text-white"}`}>
-                                        🔍 Tìm kiếm văn bằng
+                                    <Link to="/diploma/review" onClick={() => setActiveItem("/diploma/review")}
+                                        className={`block p-2 rounded ${activeItem === "/diploma/review" ? "bg-[#800020] text-white" : "hover:bg-[#800020] hover:text-white"}`}>
+                                        🔍 Duyệt văn bằng
                                     </Link>
                                 </li>
                                 <li>
@@ -102,7 +108,6 @@ const HeaderAdmin = ({ user }) => {
                                         className={`block p-2 rounded ${activeItem === "/diploma/create" ? "bg-[#800020] text-white" : "hover:bg-[#800020] hover:text-white"}`}>
                                         📝 Tạo mới văn bằng
                                     </Link>
-
                                 </li>
                                 <li>
                                     <Link
@@ -129,12 +134,6 @@ const HeaderAdmin = ({ user }) => {
                         <div className={`overflow-hidden transition-all duration-300 ${isActivityOpen ? "max-h-40" : "max-h-0"}`}>
                             <ul className="ml-6 mt-2">
                                 <li>
-                                    <Link to="/activity/issue" onClick={() => setActiveItem("/activity/issue")}
-                                        className={`block p-2 rounded ${activeItem === "/activity/issue" ? "bg-[#800020] text-white" : "hover:bg-[#800020] hover:text-white"}`}>
-                                        📜 Lịch sử cấp phát
-                                    </Link>
-                                </li>
-                                <li>
                                     <Link to="/activity/search" onClick={() => setActiveItem("/activity/search")}
                                         className={`block p-2 rounded ${activeItem === "/activity/search" ? "bg-[#800020] text-white" : "hover:bg-[#800020] hover:text-white"}`}>
                                         🔍 Lịch sử tra cứu
@@ -144,6 +143,7 @@ const HeaderAdmin = ({ user }) => {
                         </div>
                     </li>
 
+                    {/* Cài đặt */}
                     <li className="mb-2">
                         <button onClick={() => setSettingOpen(!isSettingOpen)}
                             className="flex items-center justify-between w-full p-2 rounded transition-all duration-200 hover:bg-[#800020] hover:text-white">
@@ -154,12 +154,7 @@ const HeaderAdmin = ({ user }) => {
                         </button>
                         <div className={`overflow-hidden transition-all duration-300 ${isSettingOpen ? "max-h-40" : "max-h-0"}`}>
                             <ul className="ml-6 mt-2">
-                                <li>
-                                    <Link to="/settings/academic-year" onClick={() => setActiveItem("/settings/academic-year")}
-                                        className={`block p-2 rounded ${activeItem === "/settings/academic-year" ? "bg-[#800020] text-white" : "hover:bg-[#800020] hover:text-white"}`}>
-                                        🗓️ Năm học
-                                    </Link>
-                                </li>
+
                                 <li>
                                     <Link to="/settings/faculty" onClick={() => setActiveItem("/settings/faculty")}
                                         className={`block p-2 rounded ${activeItem === "/settings/faculty" ? "bg-[#800020] text-white" : "hover:bg-[#800020] hover:text-white"}`}>
@@ -176,15 +171,26 @@ const HeaderAdmin = ({ user }) => {
                         </div>
                     </li>
 
-
-
+                    {/* Đổi mật khẩu */}
+                    <li className="mb-2">
+                        <Link
+                            to="/change-password"
+                            onClick={() => setActiveItem("/change-password")}
+                            className={`flex items-center p-2 rounded transition-all duration-200 
+                            ${activeItem === "/change-password" ? "bg-[#800020] text-white" : "hover:bg-[#800020] hover:text-white"}`}
+                        >
+                            <FaLock className="mr-2" /> Đổi mật khẩu
+                        </Link>
+                    </li>
 
                     {/* Đăng xuất */}
                     <li className="mb-2">
-                        <Link to="/logout" onClick={() => setActiveItem("/logout")}
-                            className="flex items-center p-2 rounded transition-all duration-200 hover:bg-[#800020] hover:text-white">
+                        <button
+                            onClick={onLogout}
+                            className="flex items-center p-2 rounded transition-all duration-200 hover:bg-[#800020] hover:text-white w-full text-left"
+                        >
                             <FaSignOutAlt className="mr-2" /> Đăng xuất
-                        </Link>
+                        </button>
                     </li>
                 </ul>
             </div>

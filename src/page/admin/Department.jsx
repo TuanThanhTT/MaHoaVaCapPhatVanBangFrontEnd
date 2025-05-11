@@ -3,6 +3,8 @@ import Modal from "react-modal";
 import { PencilSquareIcon, TrashIcon, PlusCircleIcon, CheckCircleIcon } from "@heroicons/react/24/solid";
 import { motion, AnimatePresence } from "framer-motion";
 import debounce from "lodash/debounce";
+import axios from "axios";
+import { useNavigate } from "react-router-dom";
 
 Modal.setAppElement("#root");
 
@@ -14,34 +16,68 @@ const Department = ({ facultyId }) => {
     const [totalPages, setTotalPages] = useState(0);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [newMajorName, setNewMajorName] = useState("");
+    const [newMajorNameEng, setNewMajorNameEng] = useState("");
     const [editMajor, setEditMajor] = useState(null);
     const [error, setError] = useState(null);
     const [isErrorModalOpen, setIsErrorModalOpen] = useState(false);
     const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
+    const navigate = useNavigate();
+
+    const getAuthConfig = () => {
+        const token = localStorage.getItem("jwtToken");
+        if (!token) {
+            throw new Error("Vui lòng đăng nhập để tiếp tục.");
+        }
+        return {
+            headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+            },
+        };
+    };
 
     const fetchMajors = async (search = "", currentPage = page) => {
         try {
             setIsLoading(true);
             const url = `http://localhost:8080/admin/major/getall/${facultyId}?page=${currentPage}&size=${size}&name=${encodeURIComponent(search)}`;
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error("Lỗi khi tải danh sách ngành học!");
-            }
-            const data = await response.json();
-            const filteredMajors = data.content
+            const response = await axios.get(url, getAuthConfig());
+            const filteredMajors = response.data.content
                 .filter(major => !major.isDelete)
                 .map(major => ({
                     id: major.idMajor,
                     name: major.majorName,
+                    nameEng: major.majorNameEng,
                     code: major.idMajor.toString()
                 }));
             setMajors(filteredMajors);
-            setTotalPages(data.totalPages);
+            setTotalPages(response.data.totalPages || 0);
         } catch (error) {
-            setError(error.message);
-            setIsErrorModalOpen(true);
-            setMajors([]);
+            console.error("Error in fetchMajors:", {
+                message: error.message,
+                response: error.response ? {
+                    status: error.response.status,
+                    data: error.response.data,
+                } : null,
+            });
+            if (error.response?.status === 401 || (error.response?.status === 403 && error.response?.data?.message?.includes("Access Denied"))) {
+                setError("Phiên đăng nhập hết hạn hoặc bạn không có quyền truy cập. Vui lòng đăng nhập lại.");
+                setIsErrorModalOpen(true);
+                setTimeout(() => {
+                    localStorage.removeItem("jwtToken");
+                    navigate("/login");
+                }, 2000);
+            } else if (error.response?.status === 403 || error.response?.data?.message?.includes("No majors found")) {
+                setError("Khoa này chưa có chuyên ngành nào.");
+                setIsErrorModalOpen(true);
+                setMajors([]);
+                setTotalPages(0);
+            } else {
+                setError(error.response?.data?.message || error.message);
+                setIsErrorModalOpen(true);
+                setMajors([]);
+                setTotalPages(0);
+            }
         } finally {
             setIsLoading(false);
         }
@@ -53,7 +89,6 @@ const Department = ({ facultyId }) => {
     );
 
     useEffect(() => {
-
         debouncedFetchMajors(searchTerm);
         return () => debouncedFetchMajors.cancel();
     }, [searchTerm, page, debouncedFetchMajors]);
@@ -64,6 +99,11 @@ const Department = ({ facultyId }) => {
             setIsErrorModalOpen(true);
             return;
         }
+        if (!newMajorNameEng.trim()) {
+            setError("Tên tiếng Anh của ngành không được để trống!");
+            setIsErrorModalOpen(true);
+            return;
+        }
 
         if (isLoading) return;
 
@@ -71,35 +111,30 @@ const Department = ({ facultyId }) => {
         const url = editMajor
             ? `http://localhost:8080/admin/major/update/${editMajor.id}`
             : `http://localhost:8080/admin/major/add`;
-        const method = editMajor ? "PUT" : "POST";
 
         try {
             const requestBody = editMajor
                 ? {
                     idMajor: editMajor.id,
                     majorName: newMajorName,
-                    faculty: { id: facultyId }, // Đưa idFaculty vào đối tượng faculty
-                    isDelete: false
+                    facultyId: facultyId,
+                    majorNameEng: newMajorNameEng
                 }
                 : {
                     majorName: newMajorName,
-                    faculty: { id: facultyId }, // Đưa idFaculty vào đối tượng faculty
-                    isDelete: false
+                    facultyId: facultyId,
+                    majorNameEng: newMajorNameEng
                 };
 
-
-            const response = await fetch(url, {
-                method: method,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(requestBody),
+            await axios({
+                method: editMajor ? "PUT" : "POST",
+                url,
+                data: requestBody,
+                ...getAuthConfig(),
             });
 
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(errorText || (editMajor ? "Cập nhật thất bại!" : "Thêm ngành thất bại!"));
-            }
-
             setNewMajorName("");
+            setNewMajorNameEng("");
             setIsModalOpen(false);
             setIsSuccessModalOpen(true);
             setEditMajor(null);
@@ -107,27 +142,56 @@ const Department = ({ facultyId }) => {
 
             setTimeout(() => setIsSuccessModalOpen(false), 2000);
         } catch (error) {
-            setError(error.message);
-            setIsErrorModalOpen(true);
+            console.error("Error in addOrEditMajor:", {
+                message: error.message,
+                response: error.response ? {
+                    status: error.response.status,
+                    data: error.response.data,
+                } : null,
+            });
+            if (error.response?.status === 401 || (error.response?.status === 403 && error.response?.data?.message?.includes("Access Denied"))) {
+                setError("Phiên đăng nhập hết hạn hoặc bạn không có quyền truy cập. Vui lòng đăng nhập lại.");
+                setIsErrorModalOpen(true);
+                setTimeout(() => {
+                    localStorage.removeItem("jwtToken");
+                    navigate("/login");
+                }, 2000);
+            } else {
+                setError(error.response?.data?.message || error.message);
+                setIsErrorModalOpen(true);
+            }
         } finally {
             setIsLoading(false);
         }
     };
+
     const deleteMajor = async (id) => {
         if (!window.confirm("Bạn có chắc chắn muốn xóa ngành này?")) return;
 
         try {
-            const response = await fetch(`http://localhost:8080/admin/major/delete/${id}`, {
-                method: "DELETE",
-            });
-            if (!response.ok) throw new Error("Xóa ngành thất bại!");
-
+            await axios.delete(`http://localhost:8080/admin/major/delete/${id}`, getAuthConfig());
             debouncedFetchMajors(searchTerm);
             setIsSuccessModalOpen(true);
             setTimeout(() => setIsSuccessModalOpen(false), 2000);
         } catch (error) {
-            setError(error.message);
-            setIsErrorModalOpen(true);
+            console.error("Error in deleteMajor:", {
+                message: error.message,
+                response: error.response ? {
+                    status: error.response.status,
+                    data: error.response.data,
+                } : null,
+            });
+            if (error.response?.status === 401 || (error.response?.status === 403 && error.response?.data?.message?.includes("Access Denied"))) {
+                setError("Phiên đăng nhập hết hạn hoặc bạn không có quyền truy cập. Vui lòng đăng nhập lại.");
+                setIsErrorModalOpen(true);
+                setTimeout(() => {
+                    localStorage.removeItem("jwtToken");
+                    navigate("/login");
+                }, 2000);
+            } else {
+                setError(error.response?.data?.message || error.message);
+                setIsErrorModalOpen(true);
+            }
         }
     };
 
@@ -157,6 +221,7 @@ const Department = ({ facultyId }) => {
                         setIsModalOpen(true);
                         setEditMajor(null);
                         setNewMajorName("");
+                        setNewMajorNameEng("");
                     }}
                     disabled={isLoading}
                 >
@@ -171,6 +236,7 @@ const Department = ({ facultyId }) => {
                             <th className="p-3">#</th>
                             <th className="p-3">Mã ngành</th>
                             <th className="p-3">Tên ngành</th>
+                            <th className="p-3">Tên tiếng Anh</th>
                             <th className="p-3">Hành động</th>
                         </tr>
                     </thead>
@@ -188,6 +254,7 @@ const Department = ({ facultyId }) => {
                                         <td className="p-3 text-center">{index + 1 + page * size}</td>
                                         <td className="p-3 text-center font-semibold text-blue-600">{major.code}</td>
                                         <td className="p-3 text-center">{major.name}</td>
+                                        <td className="p-3 text-center">{major.nameEng || '-'}</td>
                                         <td className="p-3 flex justify-center space-x-2">
                                             <button
                                                 className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-3 py-1 rounded-lg flex items-center shadow hover:from-yellow-600 hover:to-orange-600"
@@ -195,6 +262,7 @@ const Department = ({ facultyId }) => {
                                                     setIsModalOpen(true);
                                                     setEditMajor(major);
                                                     setNewMajorName(major.name);
+                                                    setNewMajorNameEng(major.nameEng || "");
                                                 }}
                                                 disabled={isLoading}
                                             >
@@ -216,8 +284,8 @@ const Department = ({ facultyId }) => {
                                     animate={{ opacity: 1 }}
                                     exit={{ opacity: 0 }}
                                 >
-                                    <td colSpan="4" className="p-3 text-center text-gray-500">
-                                        Không tìm thấy dữ liệu
+                                    <td colSpan="5" className="p-3 text-center text-gray-500">
+                                        Không tìm thấy chuyên ngành
                                     </td>
                                 </motion.tr>
                             )}
@@ -264,14 +332,28 @@ const Department = ({ facultyId }) => {
                     <h2 className="text-xl font-bold mb-4">
                         {editMajor ? "Chỉnh sửa Ngành học" : "Thêm Ngành học Mới"}
                     </h2>
-                    <input
-                        type="text"
-                        placeholder="Nhập tên ngành học"
-                        className="w-full p-2 border rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
-                        value={newMajorName}
-                        onChange={(e) => setNewMajorName(e.target.value)}
-                        disabled={isLoading}
-                    />
+                    <div className="mb-4">
+                        <label className="block text-gray-700 font-medium mb-1">Tên ngành học</label>
+                        <input
+                            type="text"
+                            placeholder="Nhập tên ngành học"
+                            className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
+                            value={newMajorName}
+                            onChange={(e) => setNewMajorName(e.target.value)}
+                            disabled={isLoading}
+                        />
+                    </div>
+                    <div className="mb-4">
+                        <label className="block text-gray-700 font-medium mb-1">Tên tiếng Anh</label>
+                        <input
+                            type="text"
+                            placeholder="Nhập tên tiếng Anh của ngành"
+                            className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
+                            value={newMajorNameEng}
+                            onChange={(e) => setNewMajorNameEng(e.target.value)}
+                            disabled={isLoading}
+                        />
+                    </div>
                     <div className="flex justify-end space-x-3">
                         <button
                             onClick={() => setIsModalOpen(false)}

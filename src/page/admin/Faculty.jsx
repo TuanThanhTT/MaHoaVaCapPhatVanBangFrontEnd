@@ -4,6 +4,7 @@ import { PencilSquareIcon, TrashIcon, PlusCircleIcon, CheckCircleIcon, ChevronLe
 import { motion, AnimatePresence } from "framer-motion";
 import debounce from "lodash/debounce";
 import { useNavigate } from "react-router-dom";
+import axios from "axios";
 
 Modal.setAppElement("#root");
 
@@ -15,7 +16,9 @@ const Faculty = () => {
     const [editDepartment, setEditDepartment] = useState(null);
     const [error, setError] = useState(null);
     const [isErrorModalOpen, setIsErrorModalOpen] = useState(false);
-    const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
+    const [isAddSuccessModalOpen, setIsAddSuccessModalOpen] = useState(false);
+    const [isEditSuccessModalOpen, setIsEditSuccessModalOpen] = useState(false);
+    const [isDeleteSuccessModalOpen, setIsDeleteSuccessModalOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [currentPage, setCurrentPage] = useState(0);
     const [pageSize] = useState(10);
@@ -32,6 +35,19 @@ const Faculty = () => {
             .replace(/Đ/g, "D");
     };
 
+    const getAuthConfig = () => {
+        const token = localStorage.getItem("jwtToken");
+        if (!token) {
+            throw new Error("Vui lòng đăng nhập để tiếp tục.");
+        }
+        return {
+            headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+            },
+        };
+    };
+
     const fetchFaculties = async (page, search) => {
         try {
             setIsLoading(true);
@@ -41,47 +57,34 @@ const Faculty = () => {
             const isNumeric = (str) => /^\d+$/.test(str.trim());
             console.log("Search term:", search, "Is numeric:", isNumeric(search));
 
+            const config = getAuthConfig();
+
             if (isNumeric(search)) {
                 url = `http://localhost:8080/admin/faculty/${search}`;
                 console.log("Calling API by ID:", url);
-                response = await fetch(url);
-                if (!response.ok) {
-                    if (response.status === 404) {
-                        throw new Error("Không tìm thấy khoa với ID này!");
-                    }
-                    throw new Error("Lỗi khi tìm kiếm khoa theo ID!");
-                }
-                const faculty = await response.json();
-                console.log("API response (by ID):", faculty);
+                response = await axios.get(url, config);
+                console.log("API response (by ID):", response.data);
                 setDepartments([{
-                    id: faculty.id,
-                    name: faculty.facultyName || "",
-                    code: faculty.facultyName
-                        ? faculty.facultyName.split(" ").map(word => word[0]?.toUpperCase() || "").join("")
+                    id: response.data.id,
+                    name: response.data.facultyName || "",
+                    code: response.data.facultyName
+                        ? response.data.facultyName.split(" ").map(word => word[0]?.toUpperCase() || "").join("")
                         : ""
                 }]);
                 setTotalPages(1);
                 setShowPagination(false);
             } else {
-                // const normalizedSearch = removeVietnameseDiacritics(search);
                 const normalizedSearch = search;
                 url = `http://localhost:8080/admin/faculty/search?name=${encodeURIComponent(normalizedSearch)}&page=${page}&size=${pageSize}`;
                 console.log("Calling API by name:", url);
-                response = await fetch(url);
-                if (!response.ok) {
-                    if (response.status === 404) {
-                        throw new Error("Không tìm thấy khoa nào khớp với từ khóa!");
-                    }
-                    throw new Error("Lỗi khi tải danh sách khoa!");
-                }
-                const data = await response.json();
-                console.log("API response (by name):", data);
+                response = await axios.get(url, config);
+                console.log("API response (by name):", response.data);
 
-                if (!data.content) {
+                if (!response.data.content) {
                     throw new Error("Dữ liệu trả về không hợp lệ!");
                 }
 
-                setDepartments(data.content.map(faculty => {
+                setDepartments(response.data.content.map(faculty => {
                     const facultyName = faculty.facultyName || "";
                     return {
                         id: faculty.id,
@@ -91,17 +94,32 @@ const Faculty = () => {
                             : ""
                     };
                 }));
-                setTotalPages(data.totalPages || 0);
+                setTotalPages(response.data.totalPages || 0);
                 setShowPagination(true);
 
-                if (page >= (data.totalPages || 0) && data.totalPages > 0) {
-                    setCurrentPage(data.totalPages - 1);
+                if (page >= (response.data.totalPages || 0) && response.data.totalPages > 0) {
+                    setCurrentPage(response.data.totalPages - 1);
                 }
             }
         } catch (error) {
-            console.error("Error in fetchFaculties:", error);
-            setError(error.message);
-            setIsErrorModalOpen(true);
+            console.error("Error in fetchFaculties:", {
+                message: error.message,
+                response: error.response ? {
+                    status: error.response.status,
+                    data: error.response.data,
+                } : null,
+            });
+            if (error.response?.status === 401 || error.response?.status === 403 || error.message.includes("đăng nhập")) {
+                setError("Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.");
+                setIsErrorModalOpen(true);
+                setTimeout(() => {
+                    localStorage.removeItem("jwtToken");
+                    navigate("/login");
+                }, 2000);
+            } else {
+                setError(error.response?.data?.message || error.message);
+                setIsErrorModalOpen(true);
+            }
             setDepartments([]);
             setTotalPages(0);
             setShowPagination(false);
@@ -139,29 +157,48 @@ const Faculty = () => {
             ? `http://localhost:8080/admin/faculty/update/${editDepartment.id}`
             : "http://localhost:8080/admin/faculty/add";
 
-        const method = editDepartment ? "PUT" : "POST";
-
         try {
-            const response = await fetch(url, {
-                method,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ facultyName: newDepartmentName, isDelete: false }),
+            const config = getAuthConfig();
+            const response = await axios({
+                method: editDepartment ? "PUT" : "POST",
+                url,
+                ...config,
+                data: { facultyName: newDepartmentName, isDelete: false },
             });
-
-            if (!response.ok) throw new Error(editDepartment ? "Cập nhật thất bại!" : "Thêm khoa thất bại!");
 
             setNewDepartmentName("");
             setIsModalOpen(false);
-            setIsSuccessModalOpen(true);
+            if (editDepartment) {
+                setIsEditSuccessModalOpen(true);
+            } else {
+                setIsAddSuccessModalOpen(true);
+            }
             setEditDepartment(null);
             debouncedFetchFaculties(currentPage, searchTerm);
 
             setTimeout(() => {
-                setIsSuccessModalOpen(false);
+                setIsAddSuccessModalOpen(false);
+                setIsEditSuccessModalOpen(false);
             }, 2000);
         } catch (error) {
-            setError(error.message);
-            setIsErrorModalOpen(true);
+            console.error("Error in addOrEditDepartment:", {
+                message: error.message,
+                response: error.response ? {
+                    status: error.response.status,
+                    data: error.response.data,
+                } : null,
+            });
+            if (error.response?.status === 401 || error.response?.status === 403 || error.message.includes("đăng nhập")) {
+                setError("Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.");
+                setIsErrorModalOpen(true);
+                setTimeout(() => {
+                    localStorage.removeItem("jwtToken");
+                    navigate("/login");
+                }, 2000);
+            } else {
+                setError(error.response?.data?.message || error.message);
+                setIsErrorModalOpen(true);
+            }
         } finally {
             setIsLoading(false);
         }
@@ -171,15 +208,8 @@ const Faculty = () => {
         if (!window.confirm("Bạn có chắc chắn muốn xóa khoa này?")) return;
 
         try {
-            const response = await fetch(`http://localhost:8080/admin/faculty/delete/${id}`, {
-                method: "DELETE",
-                headers: { "Content-Type": "application/json" },
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.message || "Xóa khoa thất bại!");
-            }
+            const config = getAuthConfig();
+            await axios.delete(`http://localhost:8080/admin/faculty/delete/${id}`, config);
 
             const remainingDepartments = departments.filter(dept => dept.id !== id);
             if (remainingDepartments.length === 0 && currentPage > 0) {
@@ -188,13 +218,29 @@ const Faculty = () => {
                 debouncedFetchFaculties(currentPage, searchTerm);
             }
 
-            setIsSuccessModalOpen(true);
+            setIsDeleteSuccessModalOpen(true);
             setTimeout(() => {
-                setIsSuccessModalOpen(false);
+                setIsDeleteSuccessModalOpen(false);
             }, 2000);
         } catch (error) {
-            setError(error.message);
-            setIsErrorModalOpen(true);
+            console.error("Error in deleteDepartment:", {
+                message: error.message,
+                response: error.response ? {
+                    status: error.response.status,
+                    data: error.response.data,
+                } : null,
+            });
+            if (error.response?.status === 401 || error.response?.status === 403 || error.message.includes("đăng nhập")) {
+                setError("Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.");
+                setIsErrorModalOpen(true);
+                setTimeout(() => {
+                    localStorage.removeItem("jwtToken");
+                    navigate("/login");
+                }, 2000);
+            } else {
+                setError(error.response?.data?.message || error.message);
+                setIsErrorModalOpen(true);
+            }
         }
     };
 
@@ -256,7 +302,7 @@ const Faculty = () => {
                                 departments.map((dept, index) => (
                                     <motion.tr
                                         key={dept.id}
-                                        className="border-b hover:bg-gray-100 transition"
+                                        className="border-b hover:bg-gray-50 transition"
                                         initial={{ opacity: 0, y: 10 }}
                                         animate={{ opacity: 1, y: 0 }}
                                         exit={{ opacity: 0, y: -10 }}
@@ -265,22 +311,15 @@ const Faculty = () => {
                                         <td className="p-3 text-center font-semibold text-blue-600">{dept.id}</td>
                                         <td className="p-3 text-center">{dept.name}</td>
                                         <td className="p-3 flex justify-center space-x-2">
-
-                                            {/* <button
-                                                className="bg-gradient-to-r from-green-600 to-teal-600 text-white px-3 py-1 rounded-lg flex items-center shadow hover:from-green-700 hover:to-teal-700"
-                                                disabled={isLoading}
-                                            >
-                                                📜 Chuyên ngành
-                                            </button> */}
                                             <button
-                                                className="bg-gradient-to-r from-green-600 to-teal-600 text-white px-3 py-1 rounded-lg flex items-center shadow hover:from-green-700 hover:to-teal-700"
-                                                onClick={() => navigate(`/settings/faculty/${dept.id}/departments`)} // Sửa đường dẫn
+                                                className="bg-gradient-to-r from-blue-700 to-blue-800 text-white px-4 py-1.5 rounded-lg flex items-center shadow-sm hover:shadow-md transition-all duration-200 border border-blue-600 hover:from-blue-800 hover:to-blue-900 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
+                                                onClick={() => navigate(`/settings/faculty/${dept.id}/departments`)}
                                                 disabled={isLoading}
                                             >
-                                                📜 Chuyên ngành
+                                                📜 <span className="ml-1">Chuyên ngành</span>
                                             </button>
                                             <button
-                                                className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-3 py-1 rounded-lg flex items-center shadow hover:from-yellow-600 hover:to-orange-600"
+                                                className="bg-gradient-to-r from-gray-100 to-gray-200 text-gray-700 px-4 py-1.5 rounded-lg flex items-center shadow-sm hover:shadow-md transition-all duration-200 border border-gray-300 hover:from-gray-200 hover:to-gray-300 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
                                                 onClick={() => {
                                                     setIsModalOpen(true);
                                                     setEditDepartment(dept);
@@ -288,14 +327,14 @@ const Faculty = () => {
                                                 }}
                                                 disabled={isLoading}
                                             >
-                                                <PencilSquareIcon className="w-5 h-5 mr-1" /> Sửa
+                                                <PencilSquareIcon className="w-4 h-4 mr-1.5" /> <span>Sửa</span>
                                             </button>
                                             <button
-                                                className="bg-gradient-to-r from-red-500 to-pink-500 text-white px-3 py-1 rounded-lg flex items-center shadow hover:from-red-600 hover:to-pink-600"
+                                                className="bg-gradient-to-r from-red-600 to-red-700 text-white px-4 py-1.5 rounded-lg flex items-center shadow-sm hover:shadow-md transition-all duration-200 border border-red-500 hover:from-red-700 hover:to-red-800 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
                                                 onClick={() => deleteDepartment(dept.id)}
                                                 disabled={isLoading}
                                             >
-                                                <TrashIcon className="w-5 h-5 mr-1" /> Xóa
+                                                <TrashIcon className="w-4 h-4 mr-1.5" /> <span>Xóa</span>
                                             </button>
                                         </td>
                                     </motion.tr>
@@ -402,8 +441,8 @@ const Faculty = () => {
             </Modal>
 
             <Modal
-                isOpen={isSuccessModalOpen}
-                onRequestClose={() => setIsSuccessModalOpen(false)}
+                isOpen={isAddSuccessModalOpen}
+                onRequestClose={() => setIsAddSuccessModalOpen(false)}
                 className="bg-white p-6 rounded-lg shadow-lg w-[30%] mx-auto mt-40"
                 overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center"
             >
@@ -414,12 +453,60 @@ const Faculty = () => {
                     transition={{ duration: 0.3 }}
                 >
                     <CheckCircleIcon className="w-10 h-10 text-green-600 mx-auto mb-2" />
-                    <h2 className="text-xl font-bold text-green-600 mb-4 text-center">
-                        {editDepartment ? "Cập nhật khoa thành công!" : isSuccessModalOpen ? "Xóa khoa thành công!" : "Thêm khoa thành công!"}
-                    </h2>
+                    <h2 className="text-xl font-bold text-green-600 mb-4 text-center">Thêm khoa thành công!</h2>
                     <div className="flex justify-center">
                         <button
-                            onClick={() => setIsSuccessModalOpen(false)}
+                            onClick={() => setIsAddSuccessModalOpen(false)}
+                            className="px-4 py-2 bg-gradient-to-r from-green-500 to-teal-500 text-white rounded-lg hover:from-green-600 hover:to-teal-600"
+                        >
+                            Đóng
+                        </button>
+                    </div>
+                </motion.div>
+            </Modal>
+
+            <Modal
+                isOpen={isEditSuccessModalOpen}
+                onRequestClose={() => setIsEditSuccessModalOpen(false)}
+                className="bg-white p-6 rounded-lg shadow-lg w-[30%] mx-auto mt-40"
+                overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center"
+            >
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    transition={{ duration: 0.3 }}
+                >
+                    <CheckCircleIcon className="w-10 h-10 text-green-600 mx-auto mb-2" />
+                    <h2 className="text-xl font-bold text-green-600 mb-4 text-center">Cập nhật khoa thành công!</h2>
+                    <div className="flex justify-center">
+                        <button
+                            onClick={() => setIsEditSuccessModalOpen(false)}
+                            className="px-4 py-2 bg-gradient-to-r from-green-500 to-teal-500 text-white rounded-lg hover:from-green-600 hover:to-teal-600"
+                        >
+                            Đóng
+                        </button>
+                    </div>
+                </motion.div>
+            </Modal>
+
+            <Modal
+                isOpen={isDeleteSuccessModalOpen}
+                onRequestClose={() => setIsDeleteSuccessModalOpen(false)}
+                className="bg-white p-6 rounded-lg shadow-lg w-[30%] mx-auto mt-40"
+                overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center"
+            >
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    transition={{ duration: 0.3 }}
+                >
+                    <CheckCircleIcon className="w-10 h-10 text-green-600 mx-auto mb-2" />
+                    <h2 className="text-xl font-bold text-green-600 mb-4 text-center">Xóa khoa thành công!</h2>
+                    <div className="flex justify-center">
+                        <button
+                            onClick={() => setIsDeleteSuccessModalOpen(false)}
                             className="px-4 py-2 bg-gradient-to-r from-green-500 to-teal-500 text-white rounded-lg hover:from-green-600 hover:to-teal-600"
                         >
                             Đóng

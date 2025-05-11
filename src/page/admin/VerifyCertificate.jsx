@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { Upload, X, CheckCircle, AlertTriangle } from "lucide-react";
+import axios from "axios";
 
 export default function VerifyCertificate() {
     const [file, setFile] = useState(null);
@@ -20,34 +21,70 @@ export default function VerifyCertificate() {
         setProgress(0);
     };
 
-    const handleVerify = () => {
-        if (!file) return;
+    const handleVerify = async () => {
+        if (!file) {
+            setResult({ valid: false, message: "Văn bằng không hợp lệ" });
+            return;
+        }
+
+        if (!file.name.toLowerCase().endsWith('.png')) {
+            setResult({ valid: false, message: "Văn bằng không hợp lệ" });
+            setLoading(false);
+            return;
+        }
+
         setLoading(true);
         setProgress(50);
 
-        setTimeout(() => setProgress(70), 1000);
-        setTimeout(() => {
+        // Tạo FormData
+        const formData = new FormData();
+        formData.append("file", file);
+
+        try {
+            console.log("Đang gửi yêu cầu API với file:", file.name);
+            // Gọi API
+            const response = await axios.post("http://localhost:8080/degree/export/check", formData, {
+                headers: {
+                    "Content-Type": "multipart/form-data",
+                },
+                onUploadProgress: (progressEvent) => {
+                    const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                    setProgress(percentCompleted);
+                },
+            });
+
+            console.log("Phản hồi API:", response.data);
+            // Kiểm tra tính hợp lệ dựa trên trường status
+            const isValid = response.data.status.includes("hợp lệ");
+            setResult({
+                valid: isValid,
+                message: isValid ? response.data.message : "Văn bằng không hợp lệ",
+            });
+        } catch (error) {
+            console.error("Lỗi API:", error);
+            setResult({
+                valid: false,
+                message: "Văn bằng không hợp lệ",
+            });
+        } finally {
+            setLoading(false);
             setProgress(100);
-            setTimeout(() => {
-                setLoading(false);
-                setResult({ valid: Math.random() > 0.5, student: "Nguyễn Văn A", gpa: "3.8" });
-            }, 500);
-        }, 2000);
+        }
     };
 
     return (
-        <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 p-6">
+        <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-white to-gray-100 p-6">
             <motion.div
-                className="bg-white p-8 rounded-3xl shadow-2xl w-full text-center max-w-lg sm:max-w-xl lg:max-w-2xl"
+                className="bg-white p-8 rounded-3xl shadow-lg w-full text-center max-w-lg sm:max-w-xl lg:max-w-2xl border border-gray-200"
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
             >
                 <h1 className="text-3xl font-bold text-gray-800 mb-6">Xác thực Văn Bằng</h1>
                 <div className="relative">
                     <label className="border-2 border-dashed border-gray-300 rounded-2xl p-6 cursor-pointer hover:border-blue-500 transition-all flex flex-col items-center justify-center bg-gray-50 shadow-sm">
-                        <Upload size={40} className="text-gray-500 mb-3" />
-                        <span className="text-gray-600 text-lg font-medium">Chọn hoặc kéo thả tệp PDF</span>
-                        <input type="file" className="hidden" onChange={handleFileChange} accept=".pdf" />
+                        <Upload size={40} className="text-gray-600 mb-3" />
+                        <span className="text-gray-600 text-lg font-medium">Chọn hoặc kéo thả tệp PNG</span>
+                        <input type="file" className="hidden" onChange={handleFileChange} accept=".png" />
                     </label>
                     {file && (
                         <div className="mt-4 flex items-center justify-between p-3 bg-gray-200 rounded-lg shadow-inner">
@@ -72,7 +109,7 @@ export default function VerifyCertificate() {
                 )}
 
                 <button
-                    className="mt-6 bg-gradient-to-r from-blue-500 to-blue-600 text-white px-8 py-3 rounded-2xl font-semibold hover:from-blue-600 hover:to-blue-700 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="mt-6 bg-gradient-to-r from-blue-500 to-blue-600 text-white px-8 py-3 rounded-2xl font-semibold hover:from-blue-600 hover:to-blue-700 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={handleVerify}
                     disabled={loading}
                 >
@@ -81,7 +118,7 @@ export default function VerifyCertificate() {
 
                 {result && (
                     <motion.div
-                        className={`mt-6 p-5 rounded-2xl text-white flex flex-col items-center shadow-lg ${result.valid ? "bg-green-500" : "bg-red-500"}`}
+                        className={`mt-6 p-5 rounded-2xl text-white flex flex-col items-center shadow-md ${result.valid ? "bg-green-500" : "bg-red-500"}`}
                         initial={{ opacity: 0, scale: 0.8 }}
                         animate={{ opacity: 1, scale: 1 }}
                     >
@@ -89,13 +126,13 @@ export default function VerifyCertificate() {
                             <>
                                 <CheckCircle size={32} className="mb-2" />
                                 <p className="text-lg font-semibold">Văn bằng hợp lệ</p>
-                                <p>Sinh viên: {result.student}</p>
-                                <p>GPA: {result.gpa}</p>
+                                <p className="text-sm mt-2">{result.message}</p>
                             </>
                         ) : (
                             <>
                                 <AlertTriangle size={32} className="mb-2" />
                                 <p className="text-lg font-semibold">Văn bằng không hợp lệ</p>
+                                <p className="text-sm mt-2">{result.message}</p>
                             </>
                         )}
                     </motion.div>

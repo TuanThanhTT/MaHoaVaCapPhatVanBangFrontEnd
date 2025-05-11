@@ -1,6 +1,6 @@
 
-import Slider from "../components/Slider";
-import FeaturesSection from "../components/FeaturesSection";
+import Slider from "../../components/Slider";
+import FeaturesSection from "../../components/FeaturesSection";
 function Home() {
 
     return (
